@@ -1,0 +1,68 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # нужно только для публикации релиза по тегу v*
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Репозиторий подставляется в приложение автоматически (проверка обновлений, «Поддержка»).
+      ORG_GRADLE_PROJECT_GITHUB_REPO: ${{ github.repository }}
+      # Необязательно: Azure Client ID для входа через Microsoft (Settings → Secrets → Actions → MS_CLIENT_ID).
+      ORG_GRADLE_PROJECT_MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftJavaLauncher-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      # Release-сборка (R8, быстрее на слабых телефонах). Подписана debug-ключом, чтобы её можно было поставить.
+      - name: Build release APK
+        id: release
+        continue-on-error: true
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload release APK
+        if: steps.release.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftJavaLauncher-release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish GitHub Release (tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
